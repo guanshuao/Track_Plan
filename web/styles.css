@@ -1,0 +1,19 @@
+html,body{height:100%;margin:0;font-family:Arial,sans-serif;line-height:1.4}
+#map{width:100%;height:100%}
+#controls{position:absolute;top:16px;left:16px;background:rgba(255,255,255,0.92);padding:12px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.2);max-width:260px;font-size:13px}
+#controls button{margin-right:6px;margin-top:4px}
+#points{margin:10px 0 0 0;padding-left:18px;max-height:160px;overflow-y:auto;font-size:12px}
+#rectContainer{margin-top:8px;font-size:12px}
+#rectPoints{margin:6px 0 0 0;padding-left:18px}
+#status{font-size:13px}
+.controls-group{margin-top:12px;font-size:12px}
+.controls-group label{display:block;margin-top:6px}
+.controls-group input,.controls-group select{width:100%;box-sizing:border-box;margin-top:2px;padding:4px;font-size:12px}
+#planActions{margin-top:8px}
+#planActions button{margin-top:0}
+#planStatus{margin-top:8px;font-size:12px;line-height:1.5}
+.info-panel{position:absolute;top:16px;right:16px;max-width:260px;background:rgba(255,255,255,0.92);padding:12px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.2);font-size:12px;line-height:1.5;max-height:calc(100% - 32px);overflow-y:auto}
+#savePhotoCentersBtn{margin-top:12px;width:100%}
+#planInfoMessage{margin-top:8px;line-height:1.5}
+#planInfoMessage.status-success{color:#2e7d32}
+#planInfoMessage.status-error{color:#c62828}

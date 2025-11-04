@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>航迹规划工具</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="map"></div>
+  <div id="controls">
+    <strong>多边形选点</strong>
+    <div id="status"></div>
+    <div>
+      <button id="finishBtn">结束选点</button>
+      <button id="resetBtn">重新开始</button>
+    </div>
+    <ul id="points"></ul>
+    <div class="controls-group">
+      <strong>底图图层</strong>
+      <label for="basemapSelect">选择底图</label>
+      <select id="basemapSelect">
+        <option value="standard" selected>标准地图</option>
+        <option value="satellite">卫星地图</option>
+        <option value="traffic">实时路况</option>
+      </select>
+    </div>
+    <div id="rectContainer" style="display:none;">
+      <strong>外接矩形顶点</strong>
+      <ul id="rectPoints"></ul>
+    </div>
+    <div id="planContainer" class="controls-group" style="display:none;">
+      <strong>航迹规划</strong>
+      <label for="frameSizeInput">像幅（mm）</label>
+      <input id="frameSizeInput" type="number" min="10" step="1" value="200">
+      <label for="focalLengthInput">焦距（mm）</label>
+      <input id="focalLengthInput" type="number" min="1" step="0.1" value="200">
+      <label for="scaleInput">比例尺分母</label>
+      <input id="scaleInput" type="number" min="1000" step="100" value="25000">
+      <label for="longOverlapInput">航向重叠（%）</label>
+      <input id="longOverlapInput" type="number" min="0" max="95" step="1" value="60">
+      <label for="latOverlapInput">旁向重叠（%）</label>
+      <input id="latOverlapInput" type="number" min="0" max="90" step="1" value="30">
+      <label for="speedInput">航速（m/s）</label>
+      <input id="speedInput" type="number" min="0.1" step="0.1" value="5">
+      <div id="planActions">
+        <button id="planPrimaryBtn" type="button">生成/隐藏航迹</button>
+        <button id="toggleFootprintsBtn" type="button" style="display:none;">显示/隐藏成像区域</button>
+      </div>
+      <div id="planStatus"></div>
+    </div>
+  </div>
+  <div id="planInfoPanel" class="info-panel" style="display:none;">
+    <div id="planInfoDetails"></div>
+    <button id="savePhotoCentersBtn" type="button" style="display:none;">保存摄影点经纬度坐标</button>
+    <div id="planInfoMessage" style="display:none;"></div>
+  </div>
+  <script src="https://webapi.amap.com/maps?v=2.0&key=__AMAP_KEY__"></script>
+  <script src="./state.js"></script>
+  <script src="./utils.js"></script>
+  <script src="./geometry.js"></script>
+  <script src="./flight-plan.js"></script>
+  <script src="./plan-storage.js"></script>
+  <script src="./plan-visuals.js"></script>
+  <script src="./selection-markers.js"></script>
+  <script src="./selection-bounds.js"></script>
+  <script src="./selection.js"></script>
+  <script src="./ui-core.js"></script>
+  <script src="./ui-plan.js"></script>
+  <script src="./ui.js"></script>
+  <script src="./map-setup.js"></script>
+  <script src="./actions.js"></script>
+  <script src="./events.js"></script>
+  <script src="./bootstrap.js"></script>
+</body>
+</html>
