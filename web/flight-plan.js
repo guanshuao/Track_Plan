@@ -2,58 +2,159 @@
   const App = window.App;
   const utils = App.utils;
   const geom = App.geometry;
-  const EPS = App.constants.GEOMETRY_EPSILON;
+  const EPS = App.constants.LENGTH_EPSILON_METERS;
+
+  function finitePositive(value) {
+    return Number.isFinite(value) && value > 0;
+  }
+
+  function ceilWithTolerance(value) {
+    return Math.ceil(value - Math.max(1, Math.abs(value)) * 1e-12);
+  }
+
+  function measureCoverageAxis(length, footprint, overlap) {
+    const nominalStep = footprint * (1 - overlap);
+    if (!finitePositive(length) || !finitePositive(footprint) || !finitePositive(nominalStep)) { return null; }
+    if (length <= footprint + EPS) {
+      return { first: length / 2, last: length / 2, count: 1, actualStep: null };
+    }
+    const first = footprint / 2;
+    const last = length - footprint / 2;
+    const intervals = Math.max(1, ceilWithTolerance((last - first) / nominalStep));
+    if (!Number.isSafeInteger(intervals) || intervals >= Number.MAX_SAFE_INTEGER) {
+      return { first: first, last: last, count: Infinity, actualStep: null, overflow: true };
+    }
+    return {
+      first: first,
+      last: last,
+      count: intervals + 1,
+      actualStep: (last - first) / intervals
+    };
+  }
+
+  function materializePositions(layout) {
+    return layout.count === 1 ? [layout.first] : utils.linspace(layout.first, layout.last, layout.count);
+  }
+
+  function orientationCandidate(metrics, useWidthAsAlong, coverageAlong, coverageAcross, options) {
+    const alongLength = useWidthAsAlong ? metrics.width : metrics.height;
+    const acrossLength = useWidthAsAlong ? metrics.height : metrics.width;
+    const alongAxis = useWidthAsAlong ? metrics.axisX : metrics.axisY;
+    const acrossAxis = useWidthAsAlong ? metrics.axisY : metrics.axisX;
+    const alongLayout = measureCoverageAxis(alongLength, coverageAlong, options.overlapLongitudinal);
+    const acrossLayout = measureCoverageAxis(acrossLength, coverageAcross, options.overlapLateral);
+    if (!alongLayout || !acrossLayout) { return null; }
+    const totalPhotos = alongLayout.overflow || acrossLayout.overflow ||
+      alongLayout.count > Math.floor(Number.MAX_SAFE_INTEGER / acrossLayout.count)
+      ? Infinity
+      : alongLayout.count * acrossLayout.count;
+    const lineSpan = alongLayout.actualStep ? alongLayout.actualStep * (alongLayout.count - 1) : 0;
+    const crossSpan = acrossLayout.actualStep ? acrossLayout.actualStep * (acrossLayout.count - 1) : 0;
+    return {
+      alongLength: alongLength,
+      acrossLength: acrossLength,
+      alongAxis: alongAxis,
+      acrossAxis: acrossAxis,
+      alongLayout: alongLayout,
+      acrossLayout: acrossLayout,
+      totalPhotos: totalPhotos,
+      // The displayed connector is a half-circle whose radius is half the
+      // line spacing, so its length is π/2 times the cross-track transition.
+      estimatedPathLength: lineSpan * acrossLayout.count + Math.PI / 2 * crossSpan
+    };
+  }
+
+  function chooseOrientation(candidates) {
+    return candidates.filter(Boolean).sort(function (a, b) {
+      if (a.estimatedPathLength !== b.estimatedPathLength) {
+        return a.estimatedPathLength - b.estimatedPathLength;
+      }
+      if (a.totalPhotos !== b.totalPhotos) { return a.totalPhotos - b.totalPhotos; }
+      if (a.acrossLayout.count !== b.acrossLayout.count) {
+        return a.acrossLayout.count - b.acrossLayout.count;
+      }
+      return b.alongLength - a.alongLength;
+    })[0] || null;
+  }
 
   function computeFlightPlan(metrics, options) {
-    if (!metrics || metrics.width <= 0 || metrics.height <= 0) { return null; }
-    const direction = metrics.height >= metrics.width ? "NS" : "EW";
-    const longSide = direction === "NS" ? metrics.height : metrics.width;
-    const shortSide = direction === "NS" ? metrics.width : metrics.height;
-    const focal = options.focalLengthMM;
-    if (!Number.isFinite(focal) || focal <= 0) { return null; }
-    const flightHeight = focal * options.scaleDenominator / 1000;
-    if (!Number.isFinite(flightHeight) || flightHeight <= 0) { return null; }
-    const groundCoverage = (options.frameSize / focal) * flightHeight;
-    if (!Number.isFinite(groundCoverage) || groundCoverage <= 0) { return null; }
-    const advanceRaw = groundCoverage * (1 - options.overlapLongitudinal);
-    const advance = advanceRaw > 0 ? advanceRaw : groundCoverage * 0.1;
-    const photosPerLine = Math.max(1, Math.ceil(longSide / advance) + 2);
-    const lineSpacingRaw = groundCoverage * (1 - options.overlapLateral);
-    const lineSpacing = lineSpacingRaw > 0 ? lineSpacingRaw : groundCoverage * 0.5;
-    const numLines = Math.max(1, Math.ceil(shortSide / lineSpacing) + 1);
-    const adjustedSpacing = numLines > 1 ? shortSide / (numLines - 1) : shortSide;
-    const exposure = options.speedMPS > 0 ? advance / options.speedMPS : null;
+    if (!metrics || !options || !finitePositive(metrics.width) || !finitePositive(metrics.height)) {
+      return { error: "选区尺寸无效。" };
+    }
+    const required = [options.frameAlongMM, options.frameAcrossMM, options.focalLengthMM,
+      options.scaleDenominator, options.speedMPS];
+    if (!required.every(finitePositive) || !Number.isFinite(options.overlapLongitudinal) ||
+      !Number.isFinite(options.overlapLateral) || options.overlapLongitudinal < 0 ||
+      options.overlapLongitudinal >= 1 || options.overlapLateral < 0 || options.overlapLateral >= 1) {
+      return { error: "航摄参数超出有效范围。" };
+    }
+    const flightHeight = options.focalLengthMM * options.scaleDenominator / 1000;
+    const coverageAlong = options.frameAlongMM * options.scaleDenominator / 1000;
+    const coverageAcross = options.frameAcrossMM * options.scaleDenominator / 1000;
+    const candidates = [
+      orientationCandidate(metrics, true, coverageAlong, coverageAcross, options),
+      orientationCandidate(metrics, false, coverageAlong, coverageAcross, options)
+    ].filter(Boolean);
+    if (!candidates.length || !finitePositive(flightHeight)) {
+      return { error: "无法根据当前参数计算覆盖范围。" };
+    }
+    const maxCandidates = App.constants.MAX_CANDIDATE_PHOTOS;
+    const photoCountCandidates = candidates.filter(function (candidate) {
+      return Number.isSafeInteger(candidate.totalPhotos) && candidate.totalPhotos <= maxCandidates;
+    });
+    if (!photoCountCandidates.length) {
+      const estimate = chooseOrientation(candidates);
+      return {
+        error: "预计候选摄影点超过 " + maxCandidates.toLocaleString("zh-CN") + " 个，请缩小选区或降低重叠率。",
+        estimatedTotalPhotos: estimate ? estimate.totalPhotos : Infinity
+      };
+    }
+    const polygonVertices = Array.isArray(metrics.projectedPolygon) ? metrics.projectedPolygon.length : 4;
+    const workFeasibleCandidates = photoCountCandidates.filter(function (candidate) {
+      return candidate.totalPhotos * polygonVertices <= App.constants.MAX_GEOMETRY_WORK_UNITS;
+    });
+    if (!workFeasibleCandidates.length) {
+      return { error: "选区边界与候选摄影点组合过于复杂，请简化边界或减少摄影点。" };
+    }
+    const chosen = chooseOrientation(workFeasibleCandidates);
+    const alongLayout = chosen.alongLayout;
+    const acrossLayout = chosen.acrossLayout;
+    const bearing = (Math.atan2(chosen.alongAxis[0], chosen.alongAxis[1]) * 180 / Math.PI + 360) % 360;
+    const exposure = alongLayout.actualStep ? alongLayout.actualStep / options.speedMPS : null;
     return {
-      direction: direction,
-      directionLabel: direction === "NS" ? "南北方向（航线沿南北布置）" : "东西方向（航线沿东西布置）",
-      longSide: longSide,
-      shortSide: shortSide,
-      numPhotosPerLine: photosPerLine,
-      numLines: numLines,
-      adjustedSpacing: adjustedSpacing,
-      groundCoverage: groundCoverage,
-      advance: advance,
-      totalPhotos: photosPerLine * numLines,
+      directionLabel: "自动优化方位 " + bearing.toFixed(1) + "° / " + ((bearing + 180) % 360).toFixed(1) + "°",
+      longAxis: chosen.alongAxis,
+      shortAxis: chosen.acrossAxis,
+      xPositions: materializePositions(alongLayout),
+      yPositions: materializePositions(acrossLayout),
+      numLines: acrossLayout.count,
+      adjustedSpacing: acrossLayout.actualStep,
+      coverageAlong: coverageAlong,
+      coverageAcross: coverageAcross,
+      advance: alongLayout.actualStep,
       exposureInterval: exposure,
-      flightHeight: flightHeight
+      flightHeight: flightHeight,
+      warnings: ["转弯曲线仅作航迹连线示意；导出的文件只包含摄影触发点，不可直接视为飞控任务文件。"]
     };
   }
 
   function planToLngLat(x, y, plan, metrics) {
-    const ratioX = plan.longSide > 0 ? x / plan.longSide : 0;
-    const ratioY = plan.shortSide > 0 ? y / plan.shortSide : 0;
-    if (plan.direction === "NS") {
-      return [metrics.west + ratioY * (metrics.east - metrics.west), metrics.south + ratioX * (metrics.north - metrics.south)];
-    }
-    return [metrics.west + ratioX * (metrics.east - metrics.west), metrics.south + ratioY * (metrics.north - metrics.south)];
+    return utils.unprojectXY(planToProjected(x, y, plan, metrics), metrics.projection);
   }
 
-  function buildFootprint(center, halfSize) {
+  function planToProjected(x, y, plan, metrics) {
     return [
-      { x: center.x - halfSize, y: center.y - halfSize },
-      { x: center.x + halfSize, y: center.y - halfSize },
-      { x: center.x + halfSize, y: center.y + halfSize },
-      { x: center.x - halfSize, y: center.y + halfSize }
+      metrics.origin[0] + plan.longAxis[0] * x + plan.shortAxis[0] * y,
+      metrics.origin[1] + plan.longAxis[1] * x + plan.shortAxis[1] * y
+    ];
+  }
+
+  function buildFootprint(center, halfAlong, halfAcross) {
+    return [
+      { x: center.x - halfAlong, y: center.y - halfAcross },
+      { x: center.x + halfAlong, y: center.y - halfAcross },
+      { x: center.x + halfAlong, y: center.y + halfAcross },
+      { x: center.x - halfAlong, y: center.y + halfAcross }
     ];
   }
 
@@ -104,50 +205,71 @@
     });
   }
 
-  function generateFlightGeometry(plan, metrics, polygonPoints) {
-    if (!plan) {
-      return { path: [], photoCenters: [], footprints: [], removedPhotos: 0, totalPhotosBeforeFilter: 0, activeLines: 0 };
+  function generateFlightGeometry(plan, metrics) {
+    if (!plan || plan.error || !metrics || !Array.isArray(metrics.projectedPolygon)) {
+      return { path: [], photoRecords: [], footprints: [], removedPhotos: 0, totalPhotosBeforeFilter: 0, activeLines: 0 };
     }
-    const xPositions = utils.linspace(0, plan.longSide, plan.numPhotosPerLine);
-    const yPositions = utils.linspace(0, plan.shortSide, plan.numLines);
-    const halfSize = plan.groundCoverage / 2;
-    const photoCenters = [];
+    const xPositions = plan.xPositions;
+    const yPositions = plan.yPositions;
+    const candidateCount = Array.isArray(xPositions) && Array.isArray(yPositions)
+      ? xPositions.length * yPositions.length : NaN;
+    if (!Number.isSafeInteger(candidateCount) || candidateCount > App.constants.MAX_CANDIDATE_PHOTOS) {
+      throw new Error("候选摄影点数量无效或超过安全上限。");
+    }
+    const halfAlong = plan.coverageAlong / 2;
+    const halfAcross = plan.coverageAcross / 2;
+    const photoRecords = [];
     const footprints = [];
     const segments = [];
-    let totalPhotosBeforeFilter = 0;
-    let keptPhotos = 0;
+    const polygon = metrics.projectedPolygon;
+    const polygonBounds = metrics.polygonBounds || geom.polygonBoundingBox(polygon);
+    const totalPhotosBeforeFilter = candidateCount;
+    let footprintsSuppressed = false;
     for (let i = 0; i < yPositions.length; i += 1) {
       const y = yPositions[i];
-      const xLine = (i % 2 === 0) ? xPositions : xPositions.slice().reverse();
-      const pathPoints = [];
-      totalPhotosBeforeFilter += xLine.length;
-      for (let j = 0; j < xLine.length; j += 1) {
-        const center = { x: xLine[j], y: y };
-        const footprint = buildFootprint(center, halfSize).map(function (corner) {
-          return planToLngLat(corner.x, corner.y, plan, metrics);
+      const keptAscending = [];
+      for (let j = 0; j < xPositions.length; j += 1) {
+        const center = { x: xPositions[j], y: y };
+        const footprintProjected = buildFootprint(center, halfAlong, halfAcross).map(function (corner) {
+          return planToProjected(corner.x, corner.y, plan, metrics);
         });
-        let keep = true;
-        if (polygonPoints && polygonPoints.length >= 3) {
-          keep = geom.polygonsIntersect(footprint, polygonPoints);
-        }
-        if (keep) {
-          pathPoints.push({ x: center.x, y: center.y });
-          photoCenters.push(planToLngLat(center.x, center.y, plan, metrics));
-          footprints.push(footprint);
-          keptPhotos += 1;
-        }
+        if (!geom.polygonsIntersect(footprintProjected, polygon, polygonBounds)) { continue; }
+        keptAscending.push({ center: center, footprintProjected: footprintProjected });
       }
-      if (pathPoints.length) {
-        segments.push({ lineIndex: i, direction: (i % 2 === 0) ? 1 : -1, pathPoints: pathPoints, turnArc: [] });
-      }
+      if (!keptAscending.length) { continue; }
+      const activeIndex = segments.length;
+      const direction = activeIndex % 2 === 0 ? 1 : -1;
+      const ordered = direction === 1 ? keptAscending : keptAscending.slice().reverse();
+      const pathPoints = ordered.map(function (item) { return { x: item.center.x, y: item.center.y }; });
+      segments.push({ direction: direction, pathPoints: pathPoints, turnArc: [] });
+      ordered.forEach(function (item) {
+        const lngLat = planToLngLat(item.center.x, item.center.y, plan, metrics);
+        photoRecords.push({
+          sequence: photoRecords.length + 1,
+          line: activeIndex + 1,
+          longitude: lngLat[0],
+          latitude: lngLat[1]
+        });
+        if (!footprintsSuppressed) {
+          if (footprints.length >= App.constants.MAX_RENDERED_FOOTPRINTS) {
+            footprints.length = 0;
+            footprintsSuppressed = true;
+          } else {
+            footprints.push(item.footprintProjected.map(function (point) {
+              return utils.unprojectXY(point, metrics.projection);
+            }));
+          }
+        }
+      });
     }
     extendSegments(segments);
     const path = assemblePath(segments, plan, metrics);
     return {
       path: path,
-      photoCenters: photoCenters,
+      photoRecords: photoRecords,
       footprints: footprints,
-      removedPhotos: Math.max(0, totalPhotosBeforeFilter - keptPhotos),
+      footprintsSuppressed: footprintsSuppressed,
+      removedPhotos: Math.max(0, totalPhotosBeforeFilter - photoRecords.length),
       totalPhotosBeforeFilter: totalPhotosBeforeFilter,
       activeLines: segments.length
     };
@@ -155,7 +277,6 @@
 
   App.flightPlan = {
     compute: computeFlightPlan,
-    planToLngLat: planToLngLat,
     generateGeometry: generateFlightGeometry
   };
 })();

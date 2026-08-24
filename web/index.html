@@ -1,72 +1,184 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="本地航空摄影航迹规划与摄影点导出工具">
+  <meta name="amap-web-key" content="__AMAP_KEY__">
+  <meta name="amap-security-code" content="__AMAP_SECURITY_CODE__">
+  <meta name="track-plan-token" content="__SESSION_TOKEN__">
   <title>航迹规划工具</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <div id="map"></div>
-  <div id="controls">
-    <strong>多边形选点</strong>
-    <div id="status"></div>
-    <div>
-      <button id="finishBtn">结束选点</button>
-      <button id="resetBtn">重新开始</button>
-    </div>
-    <ul id="points"></ul>
-    <div class="controls-group">
-      <strong>底图图层</strong>
-      <label for="basemapSelect">选择底图</label>
-      <select id="basemapSelect">
-        <option value="standard" selected>标准地图</option>
-        <option value="satellite">卫星地图</option>
-        <option value="traffic">实时路况</option>
-      </select>
-    </div>
-    <div id="rectContainer" style="display:none;">
-      <strong>外接矩形顶点</strong>
-      <ul id="rectPoints"></ul>
-    </div>
-    <div id="planContainer" class="controls-group" style="display:none;">
-      <strong>航迹规划</strong>
-      <label for="frameSizeInput">像幅（mm）</label>
-      <input id="frameSizeInput" type="number" min="10" step="1" value="200">
-      <label for="focalLengthInput">焦距（mm）</label>
-      <input id="focalLengthInput" type="number" min="1" step="0.1" value="200">
-      <label for="scaleInput">比例尺分母</label>
-      <input id="scaleInput" type="number" min="1000" step="100" value="25000">
-      <label for="longOverlapInput">航向重叠（%）</label>
-      <input id="longOverlapInput" type="number" min="0" max="95" step="1" value="60">
-      <label for="latOverlapInput">旁向重叠（%）</label>
-      <input id="latOverlapInput" type="number" min="0" max="90" step="1" value="30">
-      <label for="speedInput">航速（m/s）</label>
-      <input id="speedInput" type="number" min="0.1" step="0.1" value="5">
-      <div id="planActions">
-        <button id="planPrimaryBtn" type="button">生成/隐藏航迹</button>
-        <button id="toggleFootprintsBtn" type="button" style="display:none;">显示/隐藏成像区域</button>
+  <main id="appShell">
+    <div id="mapStage">
+      <div id="map" role="region" aria-label="航迹规划地图"></div>
+
+      <div id="mapStatusOverlay" class="map-status">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <strong id="mapStatusText" role="status" aria-live="polite" aria-atomic="true">正在连接地图服务…</strong>
+        <button id="retryMapBtn" class="button button-secondary is-hidden" type="button">重新连接</button>
       </div>
-      <div id="planStatus"></div>
+
+      <header class="topbar">
+        <div class="brand-block">
+          <span class="brand-mark" aria-hidden="true">TP</span>
+          <div>
+            <h1>航迹规划台</h1>
+            <p>航空摄影覆盖与摄影点设计</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span class="status-chip"><span class="status-dot"></span>本地运行</span>
+          <span class="status-chip status-chip-warning">GCJ-02</span>
+          <button id="shutdownBtn" class="button button-quiet" type="button">关闭服务</button>
+        </div>
+      </header>
+
+      <aside class="panel workspace-panel" aria-label="规划参数面板">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">MISSION SETUP</span>
+            <h2>任务设置</h2>
+          </div>
+          <span id="selectionStepBadge" class="step-badge">步骤 1 / 3</span>
+        </div>
+
+        <section class="workflow-section">
+          <div class="section-title-row">
+            <div class="section-index">1</div>
+            <div>
+              <h3>圈定任务区域</h3>
+              <p>按顺序点击地图，或输入精确坐标。</p>
+            </div>
+          </div>
+          <div id="status" class="inline-status" role="status" aria-live="polite" aria-atomic="true"></div>
+          <div class="button-row">
+            <button id="finishBtn" class="button button-primary" type="button">完成选区</button>
+            <button id="undoPointBtn" class="button button-secondary" type="button">撤销一点</button>
+            <button id="resetBtn" class="button button-quiet" type="button">全部重置</button>
+          </div>
+
+          <details class="precision-entry">
+            <summary>精确输入 GCJ-02 坐标</summary>
+            <form id="manualPointForm" class="coordinate-form">
+              <label>经度
+                <input id="manualLngInput" type="number" min="-180" max="180" step="any" inputmode="decimal" placeholder="例如 116.397428" required>
+              </label>
+              <label>纬度
+                <input id="manualLatInput" type="number" min="-90" max="90" step="any" inputmode="decimal" placeholder="例如 39.909230" required>
+              </label>
+              <button class="button button-secondary" type="submit">添加坐标点</button>
+              <div id="manualPointError" class="field-error" role="alert"></div>
+            </form>
+          </details>
+
+          <div class="point-list-header"><span>已选顶点</span><span id="pointCountBadge" class="count-badge">0</span></div>
+          <ol id="points" class="coordinate-list"></ol>
+        </section>
+
+        <section class="workflow-section compact-section">
+          <div class="section-title-row">
+            <div class="section-index">2</div>
+            <div>
+              <h3>地图与边界</h3>
+              <p>旋转外接矩形会自动贴合选区方向。</p>
+            </div>
+          </div>
+          <label class="field-label" for="basemapSelect">底图图层</label>
+          <select id="basemapSelect">
+            <option value="standard" selected>标准地图</option>
+            <option value="satellite">卫星影像 + 路网</option>
+            <option value="traffic">标准地图 + 路况</option>
+          </select>
+          <div id="rectContainer" class="rect-summary is-hidden">
+            <span class="field-label">旋转外接矩形顶点</span>
+            <ol id="rectPoints" class="coordinate-list compact-list"></ol>
+          </div>
+        </section>
+
+        <section id="planContainer" class="workflow-section is-hidden">
+          <div class="section-title-row">
+            <div class="section-index">3</div>
+            <div>
+              <h3>航摄参数</h3>
+              <p>像幅分为航向与旁向，计算采用米制局部坐标。</p>
+            </div>
+          </div>
+          <form novalidate>
+            <fieldset>
+              <legend>相机与比例尺</legend>
+              <div class="input-grid">
+                <label>航向像幅 <span>mm</span>
+                  <input id="frameAlongInput" type="number" min="10" max="1000" step="1" value="200" required>
+                </label>
+                <label>旁向像幅 <span>mm</span>
+                  <input id="frameAcrossInput" type="number" min="10" max="1000" step="1" value="200" required>
+                </label>
+                <label>焦距 <span>mm</span>
+                  <input id="focalLengthInput" type="number" min="1" max="2000" step="0.1" value="200" required>
+                </label>
+                <label>比例尺分母
+                  <input id="scaleInput" type="number" min="1000" max="1000000" step="100" value="25000" required>
+                </label>
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend>重叠与速度</legend>
+              <div class="input-grid">
+                <label>航向重叠 <span>%</span>
+                  <input id="longOverlapInput" type="number" min="0" max="95" step="1" value="60" required>
+                </label>
+                <label>旁向重叠 <span>%</span>
+                  <input id="latOverlapInput" type="number" min="0" max="90" step="1" value="30" required>
+                </label>
+                <label class="span-two">航速 <span>m/s</span>
+                  <input id="speedInput" type="number" min="0.1" max="300" step="0.1" value="5" required>
+                </label>
+              </div>
+            </fieldset>
+          </form>
+          <div class="button-stack">
+            <button id="planPrimaryBtn" class="button button-primary button-wide" type="button">生成航迹</button>
+            <button id="toggleFootprintsBtn" class="button button-secondary button-wide is-hidden" type="button" aria-controls="map" aria-pressed="true">隐藏成像区域</button>
+          </div>
+          <div id="planStatus" class="inline-status" role="status" aria-live="polite" aria-atomic="true"></div>
+        </section>
+      </aside>
+
+      <aside id="planInfoPanel" class="panel info-panel is-hidden" aria-label="航迹计算结果">
+        <div class="panel-heading result-heading">
+          <div>
+            <span class="eyebrow">FLIGHT SUMMARY</span>
+            <h2>规划结果</h2>
+          </div>
+          <span class="result-badge">已计算</span>
+        </div>
+        <dl id="planInfoDetails" class="metric-list"></dl>
+        <div id="planWarnings"></div>
+        <div class="crs-notice"><strong>坐标基准：GCJ-02</strong><span>如用于 WGS84 飞控，请先经过可靠、合规的坐标转换与复核。</span></div>
+        <button id="savePhotoCentersBtn" class="button button-primary button-wide is-hidden" type="button">保存摄影点坐标（GCJ-02）</button>
+        <div id="planInfoMessage" class="save-message is-hidden" role="status" aria-live="polite"></div>
+      </aside>
+
+      <div class="map-legend" aria-hidden="true">
+        <span><i class="legend-line selection-line"></i>选区</span>
+        <span><i class="legend-line bound-line"></i>优化边界</span>
+        <span><i class="legend-line route-line"></i>航迹</span>
+      </div>
     </div>
-  </div>
-  <div id="planInfoPanel" class="info-panel" style="display:none;">
-    <div id="planInfoDetails"></div>
-    <button id="savePhotoCentersBtn" type="button" style="display:none;">保存摄影点经纬度坐标</button>
-    <div id="planInfoMessage" style="display:none;"></div>
-  </div>
-  <script src="https://webapi.amap.com/maps?v=2.0&key=__AMAP_KEY__"></script>
+  </main>
   <script src="./state.js"></script>
   <script src="./utils.js"></script>
   <script src="./geometry.js"></script>
   <script src="./flight-plan.js"></script>
   <script src="./plan-storage.js"></script>
   <script src="./plan-visuals.js"></script>
-  <script src="./selection-markers.js"></script>
-  <script src="./selection-bounds.js"></script>
   <script src="./selection.js"></script>
   <script src="./ui-core.js"></script>
   <script src="./ui-plan.js"></script>
-  <script src="./ui.js"></script>
   <script src="./map-setup.js"></script>
   <script src="./actions.js"></script>
   <script src="./events.js"></script>

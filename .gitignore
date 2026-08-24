@@ -1,0 +1,13 @@
+# Local credentials
+amap.local.key
+amap.key
+.env
+
+# Generated flight plans and runtime files
+*.csv
+__pycache__/
+*.py[cod]
+
+# Editor/OS artifacts
+.DS_Store
+Thumbs.db
